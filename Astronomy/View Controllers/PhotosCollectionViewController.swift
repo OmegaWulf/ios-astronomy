@@ -10,6 +10,10 @@ import UIKit
 
 class PhotosCollectionViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     
+    var cache = Cache<Int, Data>()
+    private var photoFetchQueue = OperationQueue()
+    var operations = [Int: Operation]()
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -64,10 +68,74 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     
     private func loadImage(forCell cell: ImageCollectionViewCell, forItemAt indexPath: IndexPath) {
         
-        // let photoReference = photoReferences[indexPath.item]
+        let photoReference = photoReferences[indexPath.item]
+        let url = photoReference.imageURL.usingHTTPS
         
-        // TODO: Implement image loading here
+        // Check cache for image
+        if let cacheData = cache.value(for: photoReference.id) {
+            // Have data in cache
+            cell.imageView.image = UIImage(data: cacheData)
+            return
+        }
+        
+        
+        // Not in cache, loading new image
+//        URLSession.shared.dataTask(with: url!) { (data, _, error) in
+//            if let error = error {
+//                fatalError()
+//            }
+//
+//            guard let image = UIImage(data: data!) else {return}
+//            DispatchQueue.main.async {
+//                let visibleIndexes = self.collectionView.indexPathsForVisibleItems
+//                if visibleIndexes.contains(indexPath) {
+//                    cell.imageView.image = image
+//                }
+//            }
+//            // Save to cache
+//            self.cache.cache(value: data!, for: photoReference.id)
+//
+//            }.resume()
+        
+        var fetchOp = FetchPhotoOperation(reference: photoReference)
+        
+        
+        let cacheOp = BlockOperation {
+            guard let imageData = fetchOp.imageData else { return }
+            self.cache.cache(value: imageData, for: photoReference.id)
+        }
+        cacheOp.addDependency(fetchOp)
+        
+        let completionOp = BlockOperation {
+            defer { self.operations.removeValue(forKey: photoReference.id) }
+            
+            
+            if let currentIndex = self.collectionView.indexPath(for: cell), currentIndex != indexPath {
+                // Scrolled past
+                return
+            }
+            
+            if let data = fetchOp.imageData {
+                cell.imageView.image = UIImage(data: data)
+            }
+            
+        }
+        completionOp.addDependency(fetchOp)
+        
+        operations[photoReference.id] = fetchOp
+        
+        photoFetchQueue.addOperation(fetchOp)
+        photoFetchQueue.addOperation(cacheOp)
+        OperationQueue.main.addOperation(completionOp)
+        
     }
+    
+    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        let refID = photoReferences[indexPath.item].id
+        operations[refID]?.cancel()
+    }
+    
+    
     
     // Properties
     
@@ -75,9 +143,10 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     
     private var roverInfo: MarsRover? {
         didSet {
-            solDescription = roverInfo?.solDescriptions[3]
+            solDescription = roverInfo?.solDescriptions[100]
         }
     }
+    
     private var solDescription: SolDescription? {
         didSet {
             if let rover = roverInfo,

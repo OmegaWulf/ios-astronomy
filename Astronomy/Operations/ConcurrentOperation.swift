@@ -62,3 +62,40 @@ class ConcurrentOperation: Operation {
     }
     
 }
+
+class FetchPhotoOperation: ConcurrentOperation {
+    var ref: MarsPhotoReference
+    var imageData: Data?
+    private var dataTask: URLSessionDataTask?
+    
+    init(reference: MarsPhotoReference) {
+        self.ref = reference
+    }
+    
+    override func start() {
+        state = .isExecuting
+        let url = ref.imageURL.usingHTTPS!
+        
+        let task = URLSession.shared.dataTask(with: url) { (data, _ , error) in
+            defer { self.state = .isFinished }
+            
+            if let error = error {
+                print("cancelled: \(error)")
+                return
+            }
+            
+            guard let data = data else { return }
+            self.imageData = data
+        }
+        task.resume()
+        dataTask = task
+    }
+    
+    override func cancel() {
+        dataTask?.cancel()
+        super.cancel()
+    }
+    
+    
+    
+}
